@@ -11,6 +11,8 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    outputs:
+      digests: ${{ steps.hash.outputs.digests }}  # <-- nuevo
 
     steps:
     - name: Checkout repository
@@ -43,6 +45,13 @@ jobs:
     - name: Empaquetar x86
       run: Compress-Archive -Path build/x86/Release/CARTAGO.exe -DestinationPath CARTAGO-x86.zip
 
+    # --- NUEVO: generar hashes para SLSA ---
+    - name: Generar hashes
+      id: hash
+      shell: bash
+      run: |
+        echo "digests=$(sha256sum CARTAGO-x64.zip CARTAGO-x86.zip | base64 -w0)" >> "$GITHUB_OUTPUT"
+
     - name: Publicar Release
       uses: softprops/action-gh-release@v2
       with:
@@ -52,3 +61,15 @@ jobs:
         name: CARTAGO ${{ github.ref_name }}
         draft: false
         prerelease: false
+
+  # --- NUEVO: job de provenance SLSA ---
+  provenance:
+    needs: [build]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: "${{ needs.build.outputs.digests }}"
+      upload-assets: true  # sube el .intoto.jsonl al release automáticamente
