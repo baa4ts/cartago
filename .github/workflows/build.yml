@@ -12,7 +12,7 @@ jobs:
   build:
     runs-on: windows-latest
     outputs:
-      digests: ${{ steps.hash.outputs.digests }}  # <-- nuevo
+      digests: ${{ steps.hash-zips.outputs.digests }}
 
     steps:
     - name: Checkout repository
@@ -22,16 +22,10 @@ jobs:
       uses: microsoft/setup-msbuild@v2
 
     - name: Configure CMake x64
-      run: |
-        cmake -B build/x64 `
-          -G "Visual Studio 17 2022" `
-          -A x64
+      run: cmake -B build/x64 -G "Visual Studio 17 2022" -A x64
 
     - name: Configure CMake x86
-      run: |
-        cmake -B build/x86 `
-          -G "Visual Studio 17 2022" `
-          -A Win32
+      run: cmake -B build/x86 -G "Visual Studio 17 2022" -A Win32
 
     - name: Compilar Release x64
       run: cmake --build build/x64 --config Release
@@ -39,15 +33,27 @@ jobs:
     - name: Compilar Release x86
       run: cmake --build build/x86 --config Release
 
+    # --- Hash de los .exe (antes de empaquetar) ---
+    - name: Hash de los .exe
+      shell: bash
+      run: |
+        sha256sum build/x64/Release/CARTAGO.exe > CARTAGO-x64.exe.sha256
+        sha256sum build/x86/Release/CARTAGO.exe > CARTAGO-x86.exe.sha256
+
+    # --- Empaquetar exe + su hash dentro del zip ---
     - name: Empaquetar x64
-      run: Compress-Archive -Path build/x64/Release/CARTAGO.exe -DestinationPath CARTAGO-x64.zip
+      run: |
+        Compress-Archive -Path build/x64/Release/CARTAGO.exe, CARTAGO-x64.exe.sha256 `
+          -DestinationPath CARTAGO-x64.zip
 
     - name: Empaquetar x86
-      run: Compress-Archive -Path build/x86/Release/CARTAGO.exe -DestinationPath CARTAGO-x86.zip
+      run: |
+        Compress-Archive -Path build/x86/Release/CARTAGO.exe, CARTAGO-x86.exe.sha256 `
+          -DestinationPath CARTAGO-x86.zip
 
-    # --- NUEVO: generar hashes para SLSA ---
-    - name: Generar hashes
-      id: hash
+    # --- Hash de los zips finales para SLSA ---
+    - name: Hash de los zips
+      id: hash-zips
       shell: bash
       run: |
         echo "digests=$(sha256sum CARTAGO-x64.zip CARTAGO-x86.zip | base64 -w0)" >> "$GITHUB_OUTPUT"
@@ -62,8 +68,7 @@ jobs:
         draft: false
         prerelease: false
 
-  # --- NUEVO: job de provenance SLSA ---
-  # --- a
+  # --- SLSA firma los zips ---
   provenance:
     needs: [build]
     permissions:
@@ -73,4 +78,4 @@ jobs:
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: "${{ needs.build.outputs.digests }}"
-      upload-assets: true  # sube el .intoto.jsonl al release automáticamente
+      upload-assets: true
