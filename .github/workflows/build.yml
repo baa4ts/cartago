@@ -7,12 +7,12 @@ on:
 
 permissions:
   contents: write
+  attestations: write
+  id-token: write
 
 jobs:
   build:
     runs-on: windows-latest
-    outputs:
-      digests: ${{ steps.hash-zips.outputs.digests }}
 
     steps:
     - name: Checkout repository
@@ -33,30 +33,43 @@ jobs:
     - name: Compilar Release x86
       run: cmake --build build/x86 --config Release
 
-    # --- Hash de los .exe (antes de empaquetar) ---
-    - name: Hash de los .exe
+    - name: Hash exe x64
       shell: bash
-      run: |
-        sha256sum build/x64/Release/CARTAGO.exe > CARTAGO-x64.exe.sha256
-        sha256sum build/x86/Release/CARTAGO.exe > CARTAGO-x86.exe.sha256
+      run: sha256sum build/x64/Release/CARTAGO.exe > CARTAGO-x64.exe.sha256
 
-    # --- Empaquetar exe + su hash dentro del zip ---
+    - name: Attest exe x64
+      uses: actions/attest-build-provenance@v2
+      with:
+        subject-path: build/x64/Release/CARTAGO.exe
+
+    - name: Hash exe x86
+      shell: bash
+      run: sha256sum build/x86/Release/CARTAGO.exe > CARTAGO-x86.exe.sha256
+
+    - name: Attest exe x86
+      uses: actions/attest-build-provenance@v2
+      with:
+        subject-path: build/x86/Release/CARTAGO.exe
+
     - name: Empaquetar x64
       run: |
         Compress-Archive -Path build/x64/Release/CARTAGO.exe, CARTAGO-x64.exe.sha256 `
           -DestinationPath CARTAGO-x64.zip
+
+    - name: Attest zip x64
+      uses: actions/attest-build-provenance@v2
+      with:
+        subject-path: CARTAGO-x64.zip
 
     - name: Empaquetar x86
       run: |
         Compress-Archive -Path build/x86/Release/CARTAGO.exe, CARTAGO-x86.exe.sha256 `
           -DestinationPath CARTAGO-x86.zip
 
-    # --- Hash de los zips finales para SLSA ---
-    - name: Hash de los zips
-      id: hash-zips
-      shell: bash
-      run: |
-        echo "digests=$(sha256sum CARTAGO-x64.zip CARTAGO-x86.zip | base64 -w0)" >> "$GITHUB_OUTPUT"
+    - name: Attest zip x86
+      uses: actions/attest-build-provenance@v2
+      with:
+        subject-path: CARTAGO-x86.zip
 
     - name: Publicar Release
       uses: softprops/action-gh-release@v2
@@ -64,18 +77,8 @@ jobs:
         files: |
           CARTAGO-x64.zip
           CARTAGO-x86.zip
+          CARTAGO-x64.exe.sha256
+          CARTAGO-x86.exe.sha256
         name: CARTAGO ${{ github.ref_name }}
         draft: false
         prerelease: false
-
-  # --- SLSA firma los zips ---
-  provenance:
-    needs: [build]
-    permissions:
-      actions: read
-      id-token: write
-      contents: write
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
-    with:
-      base64-subjects: "${{ needs.build.outputs.digests }}"
-      upload-assets: true
